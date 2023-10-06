@@ -1,0 +1,439 @@
+---
+title: "Analysis of an American genetic markers dataset"
+author: "Jérémy Gamanga"
+output: html_document
+---
+The goal is to use genetic markers to predict the geographical origin of an individual. Individuals are Indians from America. I propose to build predictive linear models to predict latitude and longitude of an individual from its genetic markers. Because the number of markers (p = 5709) is larger than the number of samples (n = 494), the explicative variables will be the outputs of
+a PCA performed on genetic markers. A genetic marker is binary encoded: 1 if the individual has the mutation, 0 otherwise.
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+## Map
+
+```{r}
+NAm2 <- read.table("NAm2.txt", header=TRUE, stringsAsFactors = TRUE)
+coord <- unique(NAm2[, c("Pop","long","lat")])
+mypop <- unique(NAm2$Pop)
+palcol <- c("black","red","cyan","orange","brown","blue","pink","purple","darkgreen")
+mypch <- rep(15:17, each=length(mypop)/3)
+mycol <- rep(palcol, length=length(mypop))
+plot(coord[, c("long","lat")], pch=mypch, col=mycol, asp=1)
+legend("bottomleft", legend=coord$Pop, col=mycol, pch=mypch, cex=.75, ncol=2)
+library(maps)
+map("world", add=TRUE)
+```
+
+
+## Linear Model
+
+```{r}
+NAaux = NAm2[,-c(1:7)]
+NA.reg <- lm(NAaux$long ~ . , data= NAaux , x=TRUE)
+```
+
+```{r}
+#head(coef(NA.reg)[!is.na(coef(NA.reg))])
+NA.coeff.number <- sum(is.na(coef(NA.reg)))
+NotNa.coeff.number <-5709 - NA.coeff.number
+cat(NotNa.coeff.number, " model coefficients are non-NA.\n" )
+cat(NA.coeff.number/5709*100, "%coefficients of our linear regression model are zero. ")
+```
+
+Most of the coefficients in our linear regression model are zero. 
+
+The number of variables (5710) is far greater than the number of individuals (494). Thus, the matrix $X$ is not of full rank (here, the matrix would have to be of rank 5710, which is obviously impossible). To obtain a full-rank matrix, R's lm command will remove columns until a full matrix is obtained. Hence the fact that most of our explanatory parameters are not taken into account. 
+
+The number of explanatory parameters is too high, so we'd have to perform a PCA to reduce the size of the space. 
+
+## Dimension reduction with a Principal Component Analysis
+
+```{r}
+NAM2 <- NAm2[, grep("L", colnames(NAm2), value=TRUE)]
+library(FactoMineR)
+#ACP canonique
+pca.NAm2 <- PCA(NAM2, scale.unit = FALSE, graph=FALSE, ncp=Inf)
+summary(pca.NAm2)
+```
+
+We don't need to center the data (scale.unit at TRUE), as the variables are of the same unit. We then perform a canonical PCA.
+
+
+
+### Graph on the first two principal axis
+```{r}
+mypop <- unique(NAm2$Pop)
+npop <- length(mypop)
+
+caxes = c(1,2)
+plot(pca.NAm2, axes= caxes, label="none", col.ind="white", graph.type="classic")
+for (i in 1:npop) 
+{
+    points(pca.NAm2$ind$coord[which(NAm2$Pop == mypop[i]), caxes],
+      col=mycol[i], pch=mypch[i])
+}
+legend("bottomleft", legend=mypop, col=mycol, pch=mypch, cex=.5, ncol=3)
+
+```
+
+It can be seen that the majority of the population is indifferent to the first two principal components. However, two groups of individuals stand out: the Ache and the Surul. \ 
+
+We note that the first two principal components explain only 2.05% and 1.52% of the total variance respectively, which is very low and explains the little information we can extract from the graph above. 
+
+### Graph on axes 5 and 6
+
+```{r}
+mypop <- unique(NAm2$Pop)
+npop <- length(mypop)
+
+caxes = c(5,6)
+plot(pca.NAm2, axes= caxes, label="none", col.ind="white", graph.type="classic")
+for (i in 1:npop) 
+{
+    points(pca.NAm2$ind$coord[which(NAm2$Pop == mypop[i]), caxes],
+      col=mycol[i], pch=mypch[i])
+}
+legend("bottomleft", legend=mypop, col=mycol, pch=mypch, cex=.5, ncol=3)
+
+```
+
+Here, two groups of individuals stand out: the Karitiana and the Pima. The Chipewyan tribe could be distinguished from the Waunana tribe, but not from the Cree, for example. The fact that most tribes are close to 0 indicates that these two main components are not very discriminating. What's more, some tribes are found in the quadrants of the plane. This makes sign analysis impossible. \ 
+
+As with the previous two principal components, the proportion of variance explained by these two axes remains low.
+
+### Principal componenst selection.
+For the first two principal components, we obtain $2.050+ 1.518 = 3.568 \%$. 
+The percentage variance for each variable is very low, so unlike the previous TP, we need more principal components. 
+
+Let's use the slope change rule:
+```{r}
+plot(pca.NAm2$eig[,2], main="Eigenvalue according to index", ylab = "Eigenvalue", xlab = "index")
+```
+
+Using the "elbow" method, we can see that the "elbow" lies between 0 and 50. We therefore zoom in on this area.
+```{r}
+plot(pca.NAm2$eig[,2], xlim=c(0,50), main="Eigenvalue according to index", ylab = "Eigenvalue", xlab = "index")
+```
+
+Here we can see that the kink is between 10 and 20, so we can choose 15 principal components.
+
+For the sake of curiosity, let's take a look at the number of principal axes we'd have to choose if we used rule 1 (loss of inertia). 
+
+
+```{r}
+smallest_index <- tail(which(cumsum(pca.NAm2$eig[,2]) > 0.75), n=1)
+cat("It is necessary to take", smallest_index, "first principal axes in order to have a proportion of variance explained of more than 0.75. ")
+```
+
+With this technique, even after reduction, the number of explanatory variables remains very high, of the same order of magnitude as the number of observations. 
+
+###Optimal number on components
+
+```{r}
+NAM2.ncp <- estim_ncp(NAM2)
+cat("The selection of", NAM2.ncp$ncp, "seems to be optimal for estim_ncp.")
+```
+
+According to estim_ncp, the optimal number of components is $31$. 
+## Principal components regressio
+
+Let fit two linear models of lat and long against the scores of the first 100 PCA axes.
+### For latitude
+```{r}
+lm.NAm2.lat <- lm(V1~., data=data.frame(cbind(NAm2$lat, pca.NAm2$ind$coord[,1:100])))
+lm.NAm2.lat 
+NA.coeff.number <- sum(is.na(coef(lm.NAm2.lat)))
+NotNa.coeff.number <-100 - NA.coeff.number
+cat(NotNa.coeff.number, "model coefficients are non-NA.\n" )
+cat(NA.coeff.number, " % coefficients of our linear regression model are zero. ")
+```
+
+### For longitude
+
+```{R}
+lm.NAm2.long <- lm(V1~., data=data.frame(cbind(NAm2$long, pca.NAm2$ind$coord[,1:100])))
+lm.NAm2.long
+NA.coeff.number <- sum(is.na(coef(lm.NAm2.long)))
+NotNa.coeff.number <- 100 - NA.coeff.number
+cat(NotNa.coeff.number, "model coefficients are non-NA.\n" )
+cat(NA.coeff.number, "% coefficients of our linear regression model are zero. ")
+```
+
+
+We note that, unlike our first linear regression, these last two have no NA coefficients. Thus, dimension reduction by PCA was indeed useful, as the model did not need to remove any explanatory variables.  
+
+
+### Prediction of latitude and longitude
+
+```{r}
+lat_values <-fitted.values(lm.NAm2.lat)
+long_values <- fitted.values(lm.NAm2.long)
+plot(lat_values, col="green", main="Latitute des individus", ylab="latitude", xlab="Index de l'individu")
+points(NAm2$lat, col="red")
+plot(long_values, col="green", main="Longitude des individus", ylab="Longitude", xlab="Index de l'individu")
+points(NAm2$long, col="red")
+
+```
+
+
+In green are the estimated longitudes and latitudes, and in red the actual values. 
+Visually, we can see that the tribes (forming lines of red dots) have estimated latitudes and longitudes that remain close to the actual values, despite a significant variance. This variance does not allow us to differentiate between tribes that are very close geographically, but it is small enough to separate groups from different geographical areas.
+
+
+```{R}
+mypop <- unique(NAm2$Pop)
+npop <- length(mypop)
+
+caxes = c(5,6)
+plot(long_values, lat_values, axes= caxes, main="Locating individuals", ylab="latitude", xlab="longitude", xlim=c(-200,0))
+for (i in 1:npop) 
+{
+    pop <- which(NAm2$Pop == mypop[i])
+    points(long_values[pop], lat_values[pop],col=mycol[i], pch=mypch[i])
+}
+legend("bottomleft", legend=mypop, col=mycol, pch=mypch, cex=.75, ncol=3)
+map("world", add=TRUE)
+```
+
+We compare the location of the tribes found above with the basic location in the map from question 1, which we redisplay below:
+```{r}
+plot(coord[, c("long","lat")], pch=mypch, col=mycol, asp=1)
+legend("bottomleft", legend=coord$Pop, col=mycol, pch=mypch, cex=.75, ncol=2)
+map("world", add=TRUE)
+```
+
+
+We note that our linear regressions give us an approximately coherent map. Indeed, if we compare the positions of the tribes, we find that the geographical locations of the tribes are globally respected.
+
+Despite the fact that the tribes are more spread out in our predictive location due to the relatively small number of observations, the locations of individuals from the same tribe have a non-negligible variance.
+Let's look at the barycenter of each sub-cloud of points formed by individuals from the same tribe.
+
+
+```{R}
+mypop <- unique(NAm2$Pop)
+npop <- length(mypop)
+
+caxes = c(5,6)
+plot(long_values[1], lat_values[1], axes= caxes, main="Localisation des tribus", ylab="latitude", xlab="longitude", xlim=c(-200,0), ylim=c(-40,60))
+for (i in 1:npop) 
+{
+    pop <- which(NAm2$Pop == mypop[i])
+    points(mean(long_values[pop]), mean(lat_values[pop]),col=mycol[i], pch=mypch[i])
+}
+legend("bottomleft", legend=mypop, col=mycol, pch=mypch, cex=.75, ncol=3)
+map("world", add=TRUE)
+```
+
+The barycenters of each tribe data are relatively close to the actual tribe locations. There's no major nonsense, and the tribes are predicted in the right geographical areas. Even the Huilliche tribe being predicted in the ocean isn't really a bad result in itself. Indeed, it's a tribe that's located close to the coast, so it's normal to have this kind of result, since if we take into account the model's prediction error, in theory we'll have a circle centered on our point and containing the portion of the coast where the tribe is actually located.  
+
+Bear in mind, however, that we have lost a great deal of information through dimension reduction, via PCA, and our choice to keep only 100 principal axes. We must therefore be reasonable in our demands on the accuracy of the locations predicted by our model.  
+
+The prediction seems to be quite good as soon as we take the barycentre of the point clouds of each tribe. Our model works well when we want to locate a group of individuals we know to be in the same tribe, but doesn't allow us to predict which tribe an individual belongs to. 
+
+
+### Cross Validation
+
+The goal is to build the best predictive model to predict individual geographical coordinates. To choose the number (naxes) of principal axes that we will keep, we apply the 10-fold cross validation method.
+
+```{r}
+set_number <- sample(10, size=494, replace=TRUE)
+```
+
+This command randomly and uniformly assigns each individual to one of $10$ sets. The set number of each individual is stored in set_number.
+
+#### Explanation of the different step
+For the explanation let's focus on the case with naxes=4.
+
+
+```{r}
+naxes = 4
+mat_pred <- matrix(ncol=2, nrow=494)
+pred.coord.cf <- as.data.frame(mat_pred)
+colnames(pred.coord.cf) <- c("long", "lat")
+```
+
+
+```{r}
+fourdimlat.dataframe <- data.frame(cbind(NAm2$lat, pca.NAm2$ind$coord[,1:4]))
+lat_reg <- lm(V1~., data=fourdimlat.dataframe, subset=set_number!=1)
+```
+
+```{r}
+fourdimlong.dataframe <- data.frame(cbind(NAm2$long, pca.NAm2$ind$coord[,1:4]))
+long_reg <- lm(V1~., data=fourdimlong.dataframe, subset=set_number!=1)
+```
+
+Here, we use as training set all individuals not in the $1$ index set, and as predictors the $4$ principal components. 
+
+In this way, we train our model on the subset (all individuals not in the $1$ index set) and test it on the index set 1, for which we know the expected result, to find out whether our predictions are correct or not.
+
+We then predict the longitudes and latitudes of the individuals in the validation set, which we store in the data.frame pred.coord.cf created earlier: 
+
+```{r}
+pred.coord.cf[set_number==1,2] <- predict.lm(lat_reg, newdata = as.data.frame(fourdimlat.dataframe[set_number==1,]))
+pred.coord.cf[set_number==1,1] <- predict.lm(long_reg, newdata = as.data.frame(fourdimlong.dataframe[set_number==1,]))
+```
+
+We repeat the previous steps, successively taking the different sets as validation sets, in order to perform the 10-fold cross validation method. 
+
+```{r}
+for (i in (2:10)) {
+  fourdimlat.dataframe <- data.frame(cbind(NAm2$lat, pca.NAm2$ind$coord[,1:4]))
+  lat_reg <- lm(V1~., data=fourdimlat.dataframe, subset=set_number!=i)
+  fourdimlong.dataframe <- data.frame(cbind(NAm2$long, pca.NAm2$ind$coord[,1:4]))
+  long_reg <- lm(V1~., data=fourdimlong.dataframe, subset=set_number!=i)
+  pred.coord.cf[set_number==i,2] <- predict.lm(lat_reg, newdata = as.data.frame(fourdimlat.dataframe[set_number==i,]))
+  pred.coord.cf[set_number==i,1] <- predict.lm(long_reg, newdata = as.data.frame(fourdimlong.dataframe[set_number==i,]))
+}
+
+head(pred.coord.cf)
+```
+
+
+```{r}
+library(spam)
+library(fields)
+prediction_error <- rdist.earth.vec(pred.coord.cf, cbind(NAm2$long, NAm2$lat), miles=FALSE)
+mean(prediction_error)
+```
+
+The rdist.earth.vec function allows us to obtain the prediction error for the location of each individual. \ 
+
+When we run a linear regression model for latitude and longitude using the 4 principal components, the average prediction error for the location of an individual is around $1830km$ (the exact value depends on the $sample$ random function used to create the set_number). This is just over twice the distance Lille-Marseille as the crow flies. This may seem huge, but you have to bear in mind that we're working on the whole of North and South America. The error is therefore not so great, even if it is far from negligible.
+
+#### Apply the cross validation
+
+```{r}
+error_naxes <- function(nb_axes) {
+  mat_pred <- matrix(ncol=2, nrow=494)
+  pred.coord.cf <- as.data.frame(mat_pred)
+  colnames(pred.coord.cf) <- c("long", "lat")
+  for (i in (1:10)) {
+    naxesdimlat.dataframe <- data.frame(cbind(NAm2$lat, pca.NAm2$ind$coord[,1:nb_axes]))
+    lat_reg <- lm(V1~., data=naxesdimlat.dataframe, subset=set_number!=i)
+    naxesdimlong.dataframe <- data.frame(cbind(NAm2$long, pca.NAm2$ind$coord[,1:nb_axes]))
+    long_reg <- lm(V1~., data=naxesdimlong.dataframe, subset=set_number!=i)
+    pred.coord.cf[set_number==i,2] <- predict.lm(lat_reg, newdata = as.data.frame(naxesdimlat.dataframe[set_number==i,]))
+    pred.coord.cf[set_number==i,1] <- predict.lm(long_reg, newdata = as.data.frame(naxesdimlong.dataframe[set_number==i,]))
+  }
+  prediction_error <- rdist.earth.vec(pred.coord.cf, cbind(NAm2$long, NAm2$lat), miles=FALSE)
+  mean(prediction_error)
+}
+```
+
+The function is calculated for different values of $naxes$ : 
+The function $sapply()$ takes a function $f$ and a set $X$ and returns an array $Y$ such that $Y[i] = f(X[i])$. 
+
+```{r}
+mean_prediction_error <- sapply(seq(2, 440, by=10), error_naxes)
+mean_prediction_error
+```
+
+```{r}
+plot(seq(2, 440, by=10), mean_prediction_error, main="Prediction error as a function of the number of given principal axes.", ylab="number of main roads", xlab="average prediction error")
+```
+
+We can see that the minimum is between 0 and 100. Zoom in:
+```{r}
+plot(seq(2, 440, by=10), mean_prediction_error, xlim=c(0,100), ylim=c(1000,1300), main="Prediction error as a function of the number of principal axes given.", ylab="number of main roads", xlab="average prediction error")
+
+```
+
+To obtain the minimum (which can be difficult to evaluate graphically), you can use the following R command: 
+
+```{r}
+best_choice_index <- which(mean_prediction_error == min(mean_prediction_error))
+best_choice <- seq(2, 440, by=10)[best_choice_index]
+cat(" We obtain a minimum average prediction error for naxes =", best_choice, ".\n")
+cat(" The best choice is therefore to take", best_choice, "first main axes.")
+```
+
+
+### Model picking
+
+```{r echo=FALSE}
+cat("As seen in the previous question, the cross-validation method leads us to choose the model with the", best_choice, "first principal axes.\n")
+```
+
+```{r echo=FALSE}
+cat("The error in predicting an individual's location is then minimal, and equals ",mean_prediction_error[best_choice_index], "km.")
+```
+
+```{r}
+lat_reg <- lm(V1~., data=data.frame(cbind(NAm2$lat, pca.NAm2$ind$coord[,1:best_choice])))
+long_reg <- lm(V1~., data=data.frame(cbind(NAm2$long, pca.NAm2$ind$coord[,1:best_choice])))
+lat_values <-fitted.values(lat_reg)
+long_values <- fitted.values(long_reg)
+training_error <- rdist.earth.vec(cbind(long_values,lat_values), cbind(NAm2$long, NAm2$lat), miles=FALSE)
+head(training_error)
+mean(training_error)
+```
+
+```{r echo=FALSE}
+cat("The training error for this model is therefore ", mean(training_error), "km. It is slightly less than the prediction error, which is consistent.")
+```
+
+
+```{R}
+par(mfrow=c(2,2))
+mypop <- unique(NAm2$Pop)
+npop <- length(mypop)
+
+caxes = c(5,6)
+for (i in 1:8) 
+{
+    pop <- which(NAm2$Pop == mypop[i])
+    plot(long_values[pop], lat_values[pop],col=mycol[i], pch=mypch[i], axes= caxes, main=paste("Predicted location of individuals in the tribe", mypop[i], "."), ylab="latitude", xlab="longitude")
+    points(NAm2$long[pop], NAm2$lat[pop], col=mycol[(i+1)%%npop])
+    points(mean(long_values[pop]), mean(lat_values[pop]), col=mycol[(i+2)%%npop], pch=18)
+
+}
+
+```
+
+We display the predicted position for each individual in the first $8$ tribe. Each time, the true position is indicated by a circle of a different color and the barycenter of the point cloud by a diamond. Overall, there's a lot of variance in the results. Although the barycenters of the predicted locations remain close to the actual locations, it is difficult to say that they are satisfactory on an individual scale, due to the dispersion. Indeed, it will be difficult to choose to which tribe each individual belongs when there are tribes that are geographically close. Our model works well when we want to locate a group of individuals we know to be in the same tribe, but it doesn't allow us to predict which tribe an individual belongs to. 
+
+Indeed, the prediction error we found earlier suggests that we won't be able to differentiate between close tribes.
+Indeed: 
+
+```{R}
+
+mypop <- unique(NAm2$Pop)
+npop <- length(mypop)
+
+caxes = c(5,6)
+plot(long_values, lat_values, axes= caxes, main="Predicted location of individuals", ylab="latitude", xlab="logitude", col="white", xlim=c(-200,0), ylim=c(-40,60))
+for (i in 1:npop) 
+{
+    pop <- which(NAm2$Pop == mypop[i])
+    points(long_values[pop], lat_values[pop],col=mycol[i], pch=mypch[i])
+}
+legend("bottomleft", legend=mypop, col=mycol, pch=mypch, cex=.5, ncol=3)
+map("world", add=TRUE)
+
+plot(NAm2$long, NAm2$lat, axes= caxes, main="Actual location of individuals", ylab="latitude", xlab="logitude", col="white", xlim=c(-200,0), ylim=c(-40,60))
+for (i in 1:npop) 
+{
+    pop <- which(NAm2$Pop == mypop[i])
+    points(NAm2$long[pop], NAm2$lat[pop], col=mycol[i], pch=mypch[i])
+}
+legend("bottomleft", legend=mypop, col=mycol, pch=mypch, cex=.5, ncol=3)
+map("world", add=TRUE)
+
+```
+
+For example, the Aymara and Quechua individuals (black and dark blue dots) are difficult to differentiate from the predicted locations, even though they are in quite distinct positions in reality.
+
+In fact, these graphs illustrate the dispersal problem we're encountering. The location of certain individuals from the Huilliche tribe (red circle) is at a latitude greater than $-20, whereas the tribe is actually at a latitude of less than $-40.  
+
+Nevertheless, we can see that trends are respected: neighboring tribes are still predicted to be neighbors, and no individual is predicted to be isolated from his or her tribe...
+
+## Conclusion
+The results are good if we're looking for a model that localizes the position of a tribe, i.e. if we know that the group of individuals observed belong to the same tribe. We can then calculate the barycenter and get an idea of the actual location of the tribe in this group. This can be very useful if researchers find the bones of a group of individuals and want to find their original tribe. 
+At best, we can reduce the number of possible tribes because we know that the predicted position will not be absurd. For example, no individual from a North American tribe will be located in South America, but we won't be able to differentiate between tribes that are close to each other. 
+
+We mustn't forget that we've carried out a dimension reduction that contains far less than $75%$ of the total inertia. It is therefore illusory to expect excellent results at the level of an individual, given the amount of information not taken into account by our model due to the lack of observations in our database. \ 
+
+What's more, running two independent linear regressions for latitude and longitude seems to lose information, since these two data are correlated. On the graphs of predicted location of individuals (question 12), there does indeed appear to be a linear relationship between latitude and longitude, so this correlation is still expressed, but we could imagine a model that assumes that these two data will be correlated and thus reinforce the correlation estimated by our model.
+
+We also note that it is not necessary to take into account all the explanatory variables in our prediction model; in fact, it would be counterproductive to do so. The cross-validation method clearly shows that it's not the biggest models that predict the best. Adding too many variables risks parasitizing the "useful" information for prediction. 
